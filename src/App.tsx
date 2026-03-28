@@ -160,7 +160,7 @@ function App() {
             <textarea
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="输入你想翻译的中文，比如：你昨天到底弄完没啊？"
+                placeholder="输入你想翻译的英文，比如：Hello, I am a student."
                 className="w-full bg-transparent resize-none outline-none text-lg min-h-[100px] placeholder-gray-400"
             />
                         {/* 🚀 核心修改：调整按钮区域布局 */}
