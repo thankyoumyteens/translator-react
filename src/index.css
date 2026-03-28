@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+/* 依然保留我们为了手机端加的底色配置 */
+body {
+    margin: 0;
+    overscroll-behavior-y: none;
+    background-color: #f9fafb;
+}
