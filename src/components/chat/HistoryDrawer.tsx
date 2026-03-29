@@ -1,6 +1,6 @@
 // src/components/chat/HistoryDrawer.tsx
 import {useEffect, useState} from 'react';
-import {X, Clock, Loader2, Inbox} from 'lucide-react';
+import {X, Clock, Loader2, Inbox, ChevronDown} from 'lucide-react';
 import {getHistoryAPI} from '../../api/chat';
 import type {HistoryItem} from '../../types/chat';
 import toast from 'react-hot-toast';
@@ -8,26 +8,56 @@ import toast from 'react-hot-toast';
 interface HistoryDrawerProps {
     isOpen: boolean;
     onClose: () => void;
-    onSelectItem: (item: HistoryItem) => void; // 🚀 新增：当选择某一项时的回调函数
+    onSelectItem: (item: HistoryItem) => void;
 }
 
 export default function HistoryDrawer({isOpen, onClose, onSelectItem}: HistoryDrawerProps) {
     const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
-    const [loading, setLoading] = useState(false);
 
-    // 当抽屉打开时，去后端拉取数据
+    // 🚀 分页与加载状态
+    const [loading, setLoading] = useState(false);         // 首次加载或刷新
+    const [loadingMore, setLoadingMore] = useState(false); // 加载更多中
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+
+    // 当抽屉打开时，重置并拉取第一页数据
     useEffect(() => {
         if (isOpen) {
-            fetchHistory();
+            setPage(1);
+            setHasMore(true);
+            fetchHistory(1, false);
+        } else {
+            // 抽屉关闭时清空数据，保证下次打开是干净的
+            setHistoryList([]);
         }
     }, [isOpen]);
 
-    const fetchHistory = async () => {
-        setLoading(true);
+    // 🚀 核心逻辑：获取数据并处理分页
+    const fetchHistory = async (targetPage: number, isLoadMore: boolean) => {
+        if (isLoadMore) {
+            setLoadingMore(true);
+        } else {
+            setLoading(true);
+        }
+
         try {
-            const res = await getHistoryAPI();
+            const res = await getHistoryAPI(targetPage, 1); // 每页查 20 条
+
             if (res.code === 200) {
-                setHistoryList(res.data);
+                // ⚠️ 注意这里解构的是后端的嵌套数据
+                const {items, total_pages} = res.data;
+
+                if (isLoadMore) {
+                    // 如果是加载更多，把新数据追加到旧数据后面
+                    setHistoryList(prev => [...prev, ...items]);
+                } else {
+                    // 如果是首次加载，直接替换
+                    setHistoryList(items);
+                }
+
+                // 判断是否还有下一页
+                setHasMore(targetPage < total_pages);
+                setPage(targetPage);
             } else {
                 toast.error('获取历史记录失败');
             }
@@ -35,6 +65,13 @@ export default function HistoryDrawer({isOpen, onClose, onSelectItem}: HistoryDr
             toast.error('网络请求失败');
         } finally {
             setLoading(false);
+            setLoadingMore(false);
+        }
+    };
+
+    const loadMore = () => {
+        if (!loadingMore && hasMore) {
+            fetchHistory(page + 1, true);
         }
     };
 
@@ -61,7 +98,7 @@ export default function HistoryDrawer({isOpen, onClose, onSelectItem}: HistoryDr
                 className={`fixed inset-y-0 right-0 w-full sm:w-[400px] bg-gray-50 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
 
                 {/* 头部 */}
-                <div className="flex justify-between items-center px-6 py-4 bg-white border-b border-gray-100">
+                <div className="flex justify-between items-center px-6 py-4 bg-white border-b border-gray-100 shrink-0">
                     <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                         <Clock className="text-blue-500" size={20}/>
                         翻译历史
@@ -85,36 +122,57 @@ export default function HistoryDrawer({isOpen, onClose, onSelectItem}: HistoryDr
                             <span className="text-sm">暂无翻译记录</span>
                         </div>
                     ) : (
-                        historyList.map((item) => (
-                            // 🚀 核心修改点：
-                            // 1. 增加 onClick 事件，调用 onSelectItem
-                            // 2. 增加 cursor-pointer（手型光标）
-                            // 3. 增加 hover:border-blue-200（悬停时边框高亮）
-                            // 4. 增加 hover:shadow-md（悬停时阴影加深）
-                            <div
-                                key={item.id}
-                                onClick={() => onSelectItem(item)} // 🚀 点击调用回调
-                                className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:border-blue-200 hover:shadow-md transition-all group"
-                            >
-                                <div className="text-xs text-gray-400 mb-2 flex justify-between">
-                                    <span>{formatDate(item.created_at)}</span>
-                                    {/* 可选：加个“回填”小图标提示用户 */}
-                                    <span
-                                        className="text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium">点击回填</span>
+                        <>
+                            {/* 遍历渲染历史记录 */}
+                            {historyList.map((item) => (
+                                <div
+                                    key={item.id}
+                                    onClick={() => onSelectItem(item)}
+                                    className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:border-blue-200 hover:shadow-md transition-all group"
+                                >
+                                    <div className="text-xs text-gray-400 mb-2 flex justify-between items-center">
+                                        <span>{formatDate(item.created_at)}</span>
+                                        <span
+                                            className="text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium">点击回填</span>
+                                    </div>
+                                    <div className="mb-2">
+                                        <span className="text-sm font-semibold text-gray-500 mr-2">原</span>
+                                        <span className="text-gray-800 line-clamp-2">{item.original_text}</span>
+                                    </div>
+                                    <div className="pt-2 border-t border-gray-50">
+                                        <span className="text-sm font-semibold text-blue-500 mr-2">译</span>
+                                        <span className="text-blue-900 font-medium line-clamp-2">
+                                            {item.translated_text.split(';')[0]}
+                                        </span>
+                                    </div>
                                 </div>
-                                <div className="mb-2">
-                                    <span className="text-sm font-semibold text-gray-500 mr-2">原</span>
-                                    <span className="text-gray-800">{item.original_text}</span>
+                            ))}
+
+                            {/* 🚀 加载更多按钮 */}
+                            {hasMore ? (
+                                <button
+                                    onClick={loadMore}
+                                    disabled={loadingMore}
+                                    className="w-full py-3 mt-4 flex items-center justify-center gap-2 text-sm text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {loadingMore ? (
+                                        <>
+                                            <Loader2 className="animate-spin" size={16}/>
+                                            加载中...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ChevronDown size={16}/>
+                                            加载更多
+                                        </>
+                                    )}
+                                </button>
+                            ) : (
+                                <div className="text-center text-xs text-gray-400 py-4">
+                                    — 没有更多记录了 —
                                 </div>
-                                <div className="pt-2 border-t border-gray-50">
-                                    <span className="text-sm font-semibold text-blue-500 mr-2">译</span>
-                                    <span className="text-blue-900 font-medium">
-                    {/* 只展示第一句翻译，保持列表清爽 */}
-                                        {item.translated_text.split(';')[0]}
-                  </span>
-                                </div>
-                            </div>
-                        ))
+                            )}
+                        </>
                     )}
                 </div>
             </div>
