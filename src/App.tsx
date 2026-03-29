@@ -81,16 +81,16 @@ function App() {
             setLoading(false);
         }
     };
-
-    // 复制结果到剪贴板
-    const handleCopy = () => {
-        if (result) {
-            const textToCopy = `${result.translated_text}\n\n[发音]: ${result.pronounce}`;
-            navigator.clipboard.writeText(textToCopy);
-            // 🚀 4. 替换丑陋的 alert
-            toast.success('已复制到剪贴板');
-        }
-    };
+    //
+    // // 复制结果到剪贴板
+    // const handleCopy = () => {
+    //     if (result) {
+    //         const textToCopy = `${result.translated_text}\n\n[发音]: ${result.pronounce}`;
+    //         navigator.clipboard.writeText(textToCopy);
+    //         // 🚀 4. 替换丑陋的 alert
+    //         toast.success('已复制到剪贴板');
+    //     }
+    // };
 
     return (
         <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
