@@ -1,6 +1,6 @@
 // src/App.tsx
 import {useState, useEffect} from 'react';
-import {Volume2, Copy, SendHorizontal, LogOut, User, Clock, Trash2} from 'lucide-react';
+import {SendHorizontal, LogOut, User, Clock, Trash2} from 'lucide-react';
 import HistoryDrawer from './components/chat/HistoryDrawer';
 import type {AITranslateResult, HistoryItem} from './types/chat';
 import {translateText} from './api/chat';
@@ -170,7 +170,12 @@ function App() {
                                 {inputText.length > 0 && (
                                     <button
                                         onClick={handleClear}
-                                        className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-all"
+                                        disabled={loading} // 🚀 核心逻辑：loading 时禁用点击
+                                        className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition-all ${
+                                            loading
+                                                ? 'text-gray-300 cursor-not-allowed' // 禁用状态的 UI：文字变浅且鼠标变红圈
+                                                : 'text-gray-400 hover:text-red-500 hover:bg-red-50' // 正常状态的 UI
+                                        }`}
                                         title="清空内容"
                                     >
                                         <Trash2 size={16}/>
@@ -204,14 +209,14 @@ function App() {
                                     <h2 className="text-sm font-semibold text-blue-600 flex items-center gap-1">
                                         🗣️ 地道表达
                                     </h2>
-                                    <div className="flex gap-2 text-gray-400">
-                                        {/* 发音按钮预留了位置，后续可以接入浏览器的 Web Speech API */}
-                                        <button className="hover:text-blue-600 transition-colors p-1"><Volume2
-                                            size={18}/></button>
-                                        <button onClick={handleCopy}
-                                                className="hover:text-blue-600 transition-colors p-1"><Copy size={18}/>
-                                        </button>
-                                    </div>
+                                    {/*<div className="flex gap-2 text-gray-400">*/}
+                                    {/*    /!* 发音按钮预留了位置，后续可以接入浏览器的 Web Speech API *!/*/}
+                                    {/*    <button className="hover:text-blue-600 transition-colors p-1"><Volume2*/}
+                                    {/*        size={18}/></button>*/}
+                                    {/*    <button onClick={handleCopy}*/}
+                                    {/*            className="hover:text-blue-600 transition-colors p-1"><Copy size={18}/>*/}
+                                    {/*    </button>*/}
+                                    {/*</div>*/}
                                 </div>
                                 <div className="space-y-2">
                                     {result.translated_text.split(';').map((text, idx) => (
