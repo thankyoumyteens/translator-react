@@ -41,7 +41,7 @@ export default function HistoryDrawer({isOpen, onClose, onSelectItem}: HistoryDr
         }
 
         try {
-            const res = await getHistoryAPI(targetPage, 1); // 每页查 20 条
+            const res = await getHistoryAPI(targetPage, 10); // 每页查 10 条
 
             if (res.code === 200) {
                 // ⚠️ 注意这里解构的是后端的嵌套数据
