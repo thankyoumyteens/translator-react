@@ -219,9 +219,12 @@ function App() {
                 }
             });
         } catch (error) {
-            // 🚀 6. 捕获中断异常，静默处理，不弹报错 Toast
-            if (error.name === 'AbortError') {
+            // 🚀 6. 捕获中断异常，使用 instanceof Error 进行安全的类型收窄
+            if (error instanceof Error && error.name === 'AbortError') {
                 console.log('用户手动终止了请求');
+            } else {
+                // 可选：如果是其他未知报错，可以在这里打印排查
+                console.error('流式请求发生未知错误:', error);
             }
             setLoading(false);
             releaseWakeLock(); // 🚀 外层 try-catch 兜底释放
