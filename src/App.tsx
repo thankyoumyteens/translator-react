@@ -1,6 +1,6 @@
 // src/App.tsx
 import {useState, useEffect, useRef} from 'react';
-import {SendHorizontal, LogOut, User, Clock, Trash2, BrainCircuit} from 'lucide-react';
+import {SendHorizontal, LogOut, User, Clock, Trash2, BrainCircuit, Square} from 'lucide-react';
 import HistoryDrawer from './components/chat/HistoryDrawer';
 import type {AITranslateResult, HistoryItem} from './types/chat';
 import AuthModal from './components/auth/AuthModal';
@@ -18,13 +18,50 @@ function App() {
     const [isThinking, setIsThinking] = useState(false);
     const [rawJsonContent, setRawJsonContent] = useState('');
 
+    // 🚀 1. 新增：用于在后台静默接收数据的内存蓄水池
+    const thinkingBufferRef = useRef('');
+    const jsonBufferRef = useRef('');
+
     // 🚀 1. 新增：用于获取“思考框” DOM 节点，以实现自动滚动
     const thinkingScrollRef = useRef<HTMLDivElement>(null);
+
+    // 🚀 2. 新增：网络请求中断控制器
+    const abortControllerRef = useRef<AbortController | null>(null);
 
     // --- 用户鉴权状态 ---
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
     const [currentUser, setCurrentUser] = useState<string | null>(null);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+    // 🚀 1. 新增：存储唤醒锁的引用
+    const wakeLockRef = useRef<any>(null);
+
+    // 🚀 2. 新增：申请保持屏幕常亮的函数
+    // Wake Lock API 是现代浏览器的高级安全特性，
+    // 它有一个硬性前置条件：你的网站必须运行在 HTTPS 环境下
+    // （本地开发时的 http://localhost 是唯一的例外豁免权）。
+    const requestWakeLock = async () => {
+        try {
+            // 检查浏览器是否支持 Wake Lock API
+            if ('wakeLock' in navigator) {
+                wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+                console.log('💡 屏幕唤醒锁已激活，将保持常亮');
+            }
+        } catch (err) {
+            console.warn('⚠️ 屏幕唤醒锁申请失败:', err);
+        }
+    };
+
+    // 🚀 3. 新增：释放屏幕唤醒锁的函数
+    const releaseWakeLock = () => {
+        if (wakeLockRef.current !== null) {
+            wakeLockRef.current.release()
+                .then(() => {
+                    console.log('🌙 屏幕唤醒锁已释放，恢复系统默认息屏策略');
+                    wakeLockRef.current = null;
+                });
+        }
+    };
 
     useEffect(() => {
         const savedUser = localStorage.getItem('translator_username');
@@ -40,6 +77,30 @@ function App() {
             thinkingScrollRef.current.scrollTop = thinkingScrollRef.current.scrollHeight;
         }
     }, [thinkingContent]);
+
+    // 🚀 2. 新增：监听浏览器标签页切换事件
+    // 🚀 4. 升级：监听浏览器标签页切换事件
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                // 恢复内存蓄水池的数据
+                setThinkingContent(thinkingBufferRef.current);
+                setRawJsonContent(jsonBufferRef.current);
+
+                // 💡 极其关键：如果切回来时还在 loading，必须重新申请唤醒锁
+                if (loading && wakeLockRef.current === null) {
+                    requestWakeLock();
+                }
+            }
+        };
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+
+        // 组件卸载时也要记得释放锁
+        return () => {
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+            releaseWakeLock();
+        };
+    }, [loading]); // 注意这里把 loading 加入了依赖项
 
     const handleLogout = () => {
         localStorage.removeItem('translator_token');
@@ -65,6 +126,20 @@ function App() {
         setRawJsonContent('');
     };
 
+    // 🚀 3. 新增：手动停止生成的逻辑
+    const handleStop = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort(); // 发送中断信号
+            abortControllerRef.current = null;
+        }
+        setLoading(false);
+        setIsThinking(false);
+        setThinkingContent('');
+        setRawJsonContent('');
+        releaseWakeLock();
+        toast('已取消生成', {icon: '🛑'});
+    };
+
     const handleTranslate = async () => {
         if (!inputText.trim() || loading) return;
 
@@ -73,6 +148,16 @@ function App() {
         setThinkingContent('');
         setRawJsonContent('');
         setIsThinking(true);
+
+        // 🚀 每次新请求前，清空内存蓄水池
+        thinkingBufferRef.current = '';
+        jsonBufferRef.current = '';
+
+        // 🚀 4. 每次发请求前，实例化一个新的中断控制器
+        abortControllerRef.current = new AbortController();
+
+        // 🚀 5. 发起请求前，立刻申请屏幕常亮！
+        await requestWakeLock();
 
         const token = localStorage.getItem('translator_token');
         const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
@@ -85,21 +170,33 @@ function App() {
                     ...(token ? {Authorization: `Bearer ${token}`} : {})
                 },
                 body: JSON.stringify({text: inputText.trim()}),
+                signal: abortControllerRef.current.signal, // 🚀 5. 将中断信号与请求绑定
                 onmessage(ev) {
                     try {
                         const data = JSON.parse(ev.data);
 
                         if (data.type === 'thinking') {
-                            setThinkingContent(prev => prev + data.content);
+                            // 🚀 先将数据悄悄存入蓄水池
+                            thinkingBufferRef.current += data.content;
+                            // 🚀 只有在页面可见时，才打扰 React 触发昂贵的 UI 渲染
+                            if (!document.hidden) {
+                                setThinkingContent(thinkingBufferRef.current);
+                            }
                         } else if (data.type === 'content') {
                             setIsThinking(false);
-                            setRawJsonContent(prev => prev + data.content);
+                            // 🚀 同理，存入 JSON 蓄水池
+                            jsonBufferRef.current += data.content;
+                            if (!document.hidden) {
+                                setRawJsonContent(jsonBufferRef.current);
+                            }
                         } else if (data.type === 'finish') {
                             setResult(data.result);
                             setLoading(false);
+                            releaseWakeLock(); // 🚀 成功收到最终结果，释放唤醒锁
                         } else if (data.type === 'error') {
                             toast.error(data.message || "流式解析中断");
                             setLoading(false);
+                            releaseWakeLock(); // 🚀 报错中断，释放唤醒锁
                             throw new Error(data.message);
                         }
                     } catch (e) {
@@ -107,16 +204,27 @@ function App() {
                     }
                 },
                 onerror(err) {
+                    // 🚀 防止中止时触发底层的错误重试机制
+                    if (abortControllerRef.current?.signal.aborted) {
+                        throw err;
+                    }
                     toast.error("网络连接断开，请检查后端服务");
                     setLoading(false);
+                    releaseWakeLock(); // 🚀 网络断开，释放唤醒锁
                     throw err;
                 },
                 onclose() {
                     setLoading(false);
+                    releaseWakeLock(); // 🚀 流正常关闭，兜底释放唤醒锁
                 }
             });
         } catch (error) {
+            // 🚀 6. 捕获中断异常，静默处理，不弹报错 Toast
+            if (error.name === 'AbortError') {
+                console.log('用户手动终止了请求');
+            }
             setLoading(false);
+            releaseWakeLock(); // 🚀 外层 try-catch 兜底释放
         }
     };
 
@@ -186,11 +294,22 @@ function App() {
                                     </button>
                                 )}
                             </div>
-                            <button onClick={handleTranslate} disabled={!inputText.trim() || loading}
-                                    className="bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center shadow-sm">
-                                {loading ? <div
-                                        className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div> :
-                                    <SendHorizontal size={20}/>}
+                            {/* 🚀 7. 动态渲染的 发送 / 停止 按钮 */}
+                            <button
+                                onClick={loading ? handleStop : handleTranslate}
+                                disabled={!inputText.trim() && !loading}
+                                className={`p-3 rounded-xl flex items-center justify-center shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 ${
+                                    loading
+                                        ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
+                                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                }`}
+                                title={loading ? "停止生成" : "发送翻译"}
+                            >
+                                {loading ? (
+                                    <Square size={18} fill="currentColor" className="animate-in zoom-in duration-200"/>
+                                ) : (
+                                    <SendHorizontal size={20} className="animate-in zoom-in duration-200"/>
+                                )}
                             </button>
                         </div>
                     </section>
