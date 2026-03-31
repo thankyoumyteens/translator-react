@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "pack:zip": "npm run build && node pack.js"
+    "pack:zip": "node pack.js"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
