@@ -4,6 +4,9 @@ FROM nginx:alpine
 # 将本地打包好的 dist 目录下的静态文件，复制到 Nginx 的默认发布目录
 COPY dist /usr/share/nginx/html
 
+# 🚀 新增这一行：将我们自定义的 Nginx 配置，覆盖掉容器自带的默认配置
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 # 暴露 80 端口（HTTP 默认端口）
 EXPOSE 80
 
