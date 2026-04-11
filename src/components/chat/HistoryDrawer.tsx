@@ -61,8 +61,33 @@ export default function HistoryDrawer({isOpen, onClose, onSelectItem}: HistoryDr
             } else {
                 toast.error('获取历史记录失败');
             }
-        } catch (error) {
-            toast.error('网络请求失败');
+        }catch (error: any) {
+            // 1. 先把极其详尽的原始错误对象打印到控制台，方便后续深度排查
+            console.error("🚨 完整错误对象:", error);
+
+            let errorMsg = '网络请求失败';
+
+            // 2. 剥丝抽茧，安全提取具体的报错信息 (加上了可选链 ?. 防御性编程)
+            if (error?.response) {
+                // 🔴 服务器收到了请求，但返回了非 2xx 的状态码 (比如 500, 404, 502)
+                const status = error.response.status;
+                const serverDetail = error.response.data?.detail || error.response.data?.message || JSON.stringify(error.response.data);
+                errorMsg = `服务器报错 (${status}): ${serverDetail}`;
+
+            } else if (error?.request) {
+                // 🟡 请求发出去了，但服务器根本没理你 (通常是 CORS 跨域拦截、断网、或后端完全没启动)
+                errorMsg = '未收到服务器响应 (可能是跨域拦截或后端未启动)';
+
+            } else {
+                // 🔵 代码逻辑报错，或者请求还没发出去就被浏览器掐断了 (比如 iOS 极严苛的混合内容拦截)
+                errorMsg = `请求被阻断: ${error?.message || '未知错误'}`;
+            }
+
+            // 3. 把极其详细的死因显示在屏幕上
+            toast.error(errorMsg, {
+                duration: 1000,
+                style: { maxWidth: '500px', wordBreak: 'break-word' }
+            });
         } finally {
             setLoading(false);
             setLoadingMore(false);
