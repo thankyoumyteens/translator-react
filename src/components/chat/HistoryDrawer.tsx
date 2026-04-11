@@ -61,33 +61,53 @@ export default function HistoryDrawer({isOpen, onClose, onSelectItem}: HistoryDr
             } else {
                 toast.error('获取历史记录失败');
             }
-        }catch (error: any) {
-            // 1. 先把极其详尽的原始错误对象打印到控制台，方便后续深度排查
+        } catch (error: any) {
             console.error("🚨 完整错误对象:", error);
 
-            let errorMsg = '网络请求失败';
+            // 1. 提取最核心的底层标识
+            const errMsg = error?.message || '空';
+            const errCode = error?.code || '空';
+            const reqUrl = error?.config?.url || '未知URL';
+            const reqMethod = error?.config?.method?.toUpperCase() || '未知Method';
 
-            // 2. 剥丝抽茧，安全提取具体的报错信息 (加上了可选链 ?. 防御性编程)
+            let detailedMsg = '';
+
+            // 2. 剥丝抽茧，构建多维度报错文案
             if (error?.response) {
-                // 🔴 服务器收到了请求，但返回了非 2xx 的状态码 (比如 500, 404, 502)
+                // 🔴 服务端正常拒绝 (有状态码，代表网络没断)
                 const status = error.response.status;
-                const serverDetail = error.response.data?.detail || error.response.data?.message || JSON.stringify(error.response.data);
-                errorMsg = `服务器报错 (${status}): ${serverDetail}`;
+                const dataStr = JSON.stringify(error.response.data || {}).substring(0, 100); // 截断防过长
+                detailedMsg = `[服务端拒收]\n状态码: ${status}\n错误码: ${errCode}\n返回值: ${dataStr}`;
 
             } else if (error?.request) {
-                // 🟡 请求发出去了，但服务器根本没理你 (通常是 CORS 跨域拦截、断网、或后端完全没启动)
-                errorMsg = '未收到服务器响应 (可能是跨域拦截或后端未启动)';
+                // 🟡 典型的 iOS 断网/被杀后台/TCP阻断区
+                detailedMsg = `[未收到任何响应 (硬断开)]\n动词: ${reqMethod}\n地址: ${reqUrl}\n底层消息: ${errMsg}\n底层代码: ${errCode}\n(注: 若瞬间发生，大概率是 TCP RST 或跨域死锁；若等了很久，则是超时)`;
 
             } else {
-                // 🔵 代码逻辑报错，或者请求还没发出去就被浏览器掐断了 (比如 iOS 极严苛的混合内容拦截)
-                errorMsg = `请求被阻断: ${error?.message || '未知错误'}`;
+                // 🔵 Axios 内部代码报错
+                detailedMsg = `[请求构建崩溃]\n详情: ${errMsg}`;
             }
 
-            // 3. 把极其详细的死因显示在屏幕上
-            toast.error(errorMsg, {
-                duration: 1000,
-                style: { maxWidth: '500px', wordBreak: 'break-word' }
-            });
+            // 3. 将详细信息推送到 UI 面板
+            // 注意：如果你的 toast 组件不支持 \n 换行，可以临时换成原生的 alert(detailedMsg) 进行硬核调试
+            toast.error(
+                <div style={{
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    fontSize: '13px',
+                    lineHeight: '1.5',
+                    textAlign: 'left'
+                }}>
+                    {detailedMsg}
+                </div>,
+                {
+                    duration: 2000,
+                    style: {maxWidth: '90vw', background: '#ffebee', color: '#c62828'}
+                }
+            );
+
+            // 如果嫌 toast 不够直接，解开下面的注释，直接用原生弹窗糊在脸上
+            // alert(detailedMsg);
         } finally {
             setLoading(false);
             setLoadingMore(false);
