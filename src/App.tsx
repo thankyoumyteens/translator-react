@@ -1,11 +1,17 @@
 // src/App.tsx
 import {useState, useEffect, useRef} from 'react';
-import {SendHorizontal, LogOut, User, Clock, Trash2, BrainCircuit, Square} from 'lucide-react';
-import HistoryDrawer from './components/chat/HistoryDrawer';
+import {SendHorizontal, LogOut, User, Clock, Trash2, BrainCircuit, Square, Sparkles, RefreshCw} from 'lucide-react';import HistoryDrawer from './components/chat/HistoryDrawer';
 import type {AITranslateResult, HistoryItem} from './types/chat';
 import AuthModal from './components/auth/AuthModal';
 import toast, {Toaster} from 'react-hot-toast';
 import {fetchEventSource} from '@microsoft/fetch-event-source';
+
+// 🚀 新增：定义模型的数据类型
+type AIModel = {
+    id: string;
+    name: string;
+    is_default?: boolean;
+};
 
 function App() {
     // --- 翻译业务状态 ---
@@ -13,19 +19,18 @@ function App() {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<AITranslateResult | null>(null);
 
+    // 🚀 新增：模型选择相关的状态
+    const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
+    const [selectedModel, setSelectedModel] = useState<string>('');
+
     // --- 流式输出专属状态 ---
     const [thinkingContent, setThinkingContent] = useState('');
     const [isThinking, setIsThinking] = useState(false);
     const [rawJsonContent, setRawJsonContent] = useState('');
 
-    // 🚀 1. 新增：用于在后台静默接收数据的内存蓄水池
     const thinkingBufferRef = useRef('');
     const jsonBufferRef = useRef('');
-
-    // 🚀 1. 新增：用于获取“思考框” DOM 节点，以实现自动滚动
     const thinkingScrollRef = useRef<HTMLDivElement>(null);
-
-    // 🚀 2. 新增：网络请求中断控制器
     const abortControllerRef = useRef<AbortController | null>(null);
 
     // --- 用户鉴权状态 ---
@@ -33,16 +38,10 @@ function App() {
     const [currentUser, setCurrentUser] = useState<string | null>(null);
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
-    // 🚀 1. 新增：存储唤醒锁的引用
     const wakeLockRef = useRef<any>(null);
 
-    // 🚀 2. 新增：申请保持屏幕常亮的函数
-    // Wake Lock API 是现代浏览器的高级安全特性，
-    // 它有一个硬性前置条件：你的网站必须运行在 HTTPS 环境下
-    // （本地开发时的 http://localhost 是唯一的例外豁免权）。
     const requestWakeLock = async () => {
         try {
-            // 检查浏览器是否支持 Wake Lock API
             if ('wakeLock' in navigator) {
                 wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
                 console.log('💡 屏幕唤醒锁已激活，将保持常亮');
@@ -52,7 +51,6 @@ function App() {
         }
     };
 
-    // 🚀 3. 新增：释放屏幕唤醒锁的函数
     const releaseWakeLock = () => {
         if (wakeLockRef.current !== null) {
             wakeLockRef.current.release()
@@ -63,6 +61,29 @@ function App() {
         }
     };
 
+    // 🚀 新增：组件挂载时，去后端拉取可用的模型列表
+    useEffect(() => {
+        const fetchModels = async () => {
+            try {
+                const baseUrl = import.meta.env.VITE_API_BASE_URL || '';
+                const response = await fetch(`${baseUrl}/chat/models`);
+                const resJson = await response.json();
+
+                if (resJson.code === 200 && resJson.data.length > 0) {
+                    setAvailableModels(resJson.data);
+                    // 找出后端标记的默认模型，如果没有就用第一个
+                    const defaultModel = resJson.data.find((m: AIModel) => m.is_default) || resJson.data[0];
+                    setSelectedModel(defaultModel.id);
+                }
+            } catch (error) {
+                console.error('获取模型列表失败:', error);
+                toast.error('获取模型列表失败，请检查网络');
+            }
+        };
+
+        fetchModels();
+    }, []);
+
     useEffect(() => {
         const savedUser = localStorage.getItem('translator_username');
         if (savedUser) {
@@ -70,24 +91,18 @@ function App() {
         }
     }, []);
 
-    // 🚀 2. 新增：监听思考内容的变化，自动将滚动条推到底部
     useEffect(() => {
         if (thinkingScrollRef.current) {
-            // 使用 scrollTop = scrollHeight 实现极其跟手的无延迟滚动
             thinkingScrollRef.current.scrollTop = thinkingScrollRef.current.scrollHeight;
         }
     }, [thinkingContent]);
 
-    // 🚀 2. 新增：监听浏览器标签页切换事件
-    // 🚀 4. 升级：监听浏览器标签页切换事件
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (!document.hidden) {
-                // 恢复内存蓄水池的数据
                 setThinkingContent(thinkingBufferRef.current);
                 setRawJsonContent(jsonBufferRef.current);
 
-                // 💡 极其关键：如果切回来时还在 loading，必须重新申请唤醒锁
                 if (loading && wakeLockRef.current === null) {
                     requestWakeLock();
                 }
@@ -95,12 +110,11 @@ function App() {
         };
         document.addEventListener("visibilitychange", handleVisibilityChange);
 
-        // 组件卸载时也要记得释放锁
         return () => {
             document.removeEventListener("visibilitychange", handleVisibilityChange);
             releaseWakeLock();
         };
-    }, [loading]); // 注意这里把 loading 加入了依赖项
+    }, [loading]);
 
     const handleLogout = () => {
         localStorage.removeItem('translator_token');
@@ -126,10 +140,9 @@ function App() {
         setRawJsonContent('');
     };
 
-    // 🚀 3. 新增：手动停止生成的逻辑
     const handleStop = () => {
         if (abortControllerRef.current) {
-            abortControllerRef.current.abort(); // 发送中断信号
+            abortControllerRef.current.abort();
             abortControllerRef.current = null;
         }
         setLoading(false);
@@ -140,8 +153,15 @@ function App() {
         toast('已取消生成', {icon: '🛑'});
     };
 
-    const handleTranslate = async () => {
+    // 🚀 给函数增加一个默认值为 false 的 isRetry 参数
+    const handleTranslate = async (isRetry = false) => {
         if (!inputText.trim() || loading) return;
+
+        // 🚀 确保模型已经加载完毕并被选中
+        if (!selectedModel) {
+            toast.error("AI 模型列表尚未加载完成");
+            return;
+        }
 
         setLoading(true);
         setResult(null);
@@ -149,14 +169,10 @@ function App() {
         setRawJsonContent('');
         setIsThinking(true);
 
-        // 🚀 每次新请求前，清空内存蓄水池
         thinkingBufferRef.current = '';
         jsonBufferRef.current = '';
 
-        // 🚀 4. 每次发请求前，实例化一个新的中断控制器
         abortControllerRef.current = new AbortController();
-
-        // 🚀 5. 发起请求前，立刻申请屏幕常亮！
         await requestWakeLock();
 
         const token = localStorage.getItem('translator_token');
@@ -169,22 +185,24 @@ function App() {
                     'Content-Type': 'application/json',
                     ...(token ? {Authorization: `Bearer ${token}`} : {})
                 },
-                body: JSON.stringify({text: inputText.trim()}),
-                signal: abortControllerRef.current.signal, // 🚀 5. 将中断信号与请求绑定
+                // 🚀 将 selectedModel 塞入 payload 传给后端
+                body: JSON.stringify({
+                    text: inputText.trim(),
+                    model_id: selectedModel,
+                    force_refresh: isRetry // 🚀 把参数传给后端
+                }),
+                signal: abortControllerRef.current.signal,
                 onmessage(ev) {
                     try {
                         const data = JSON.parse(ev.data);
 
                         if (data.type === 'thinking') {
-                            // 🚀 先将数据悄悄存入蓄水池
                             thinkingBufferRef.current += data.content;
-                            // 🚀 只有在页面可见时，才打扰 React 触发昂贵的 UI 渲染
                             if (!document.hidden) {
                                 setThinkingContent(thinkingBufferRef.current);
                             }
                         } else if (data.type === 'content') {
                             setIsThinking(false);
-                            // 🚀 同理，存入 JSON 蓄水池
                             jsonBufferRef.current += data.content;
                             if (!document.hidden) {
                                 setRawJsonContent(jsonBufferRef.current);
@@ -192,11 +210,11 @@ function App() {
                         } else if (data.type === 'finish') {
                             setResult(data.result);
                             setLoading(false);
-                            releaseWakeLock(); // 🚀 成功收到最终结果，释放唤醒锁
+                            releaseWakeLock();
                         } else if (data.type === 'error') {
                             toast.error(data.message || "流式解析中断");
                             setLoading(false);
-                            releaseWakeLock(); // 🚀 报错中断，释放唤醒锁
+                            releaseWakeLock();
                             throw new Error(data.message);
                         }
                     } catch (e) {
@@ -204,30 +222,27 @@ function App() {
                     }
                 },
                 onerror(err) {
-                    // 🚀 防止中止时触发底层的错误重试机制
                     if (abortControllerRef.current?.signal.aborted) {
                         throw err;
                     }
                     toast.error("网络连接断开，请检查后端服务");
                     setLoading(false);
-                    releaseWakeLock(); // 🚀 网络断开，释放唤醒锁
+                    releaseWakeLock();
                     throw err;
                 },
                 onclose() {
                     setLoading(false);
-                    releaseWakeLock(); // 🚀 流正常关闭，兜底释放唤醒锁
+                    releaseWakeLock();
                 }
             });
         } catch (error) {
-            // 🚀 6. 捕获中断异常，使用 instanceof Error 进行安全的类型收窄
             if (error instanceof Error && error.name === 'AbortError') {
                 console.log('用户手动终止了请求');
             } else {
-                // 可选：如果是其他未知报错，可以在这里打印排查
                 console.error('流式请求发生未知错误:', error);
             }
             setLoading(false);
-            releaseWakeLock(); // 🚀 外层 try-catch 兜底释放
+            releaseWakeLock();
         }
     };
 
@@ -286,30 +301,64 @@ function App() {
                             placeholder="输入你想翻译的英文，比如：Hello, I am a student."
                             className="w-full bg-transparent resize-none outline-none text-lg min-h-[100px] placeholder-gray-400 disabled:cursor-not-allowed"
                         />
-                        <div className="flex justify-between items-center mt-2">
-                            <div className="flex-1">
+
+                        {/* 🚀 底部工具栏优化：模型选择器 + 清空按钮 + 发送按钮 */}
+                        <div className="flex justify-between items-end mt-3 gap-2">
+                            <div className="flex-1 flex flex-col items-start gap-2">
+                                {/* 模型选择下拉框 */}
+                                <div className="relative flex items-center w-full max-w-[200px]">
+                                    <div className="absolute left-2.5 text-blue-500 pointer-events-none">
+                                        <Sparkles size={14}/>
+                                    </div>
+                                    <select
+                                        value={selectedModel}
+                                        onChange={(e) => setSelectedModel(e.target.value)}
+                                        disabled={loading || availableModels.length === 0}
+                                        className="w-full bg-white border border-gray-200 text-gray-600 text-xs font-medium rounded-lg pl-8 pr-6 py-2 outline-none appearance-none cursor-pointer hover:border-blue-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm truncate"
+                                        title="选择背后的 AI 模型"
+                                    >
+                                        {availableModels.length === 0 ? (
+                                            <option value="">模型加载中...</option>
+                                        ) : (
+                                            availableModels.map(model => (
+                                                <option key={model.id} value={model.id}>
+                                                    {model.name}
+                                                </option>
+                                            ))
+                                        )}
+                                    </select>
+                                    {/* 下拉箭头遮罩 */}
+                                    <div className="absolute right-2 pointer-events-none text-gray-400">
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                                                  d="M19 9l-7 7-7-7"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+
+                                {/* 清空按钮 (仅在有输入时显示) */}
                                 {inputText.length > 0 && (
                                     <button onClick={handleClear} disabled={loading}
-                                            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition-all ${loading ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
+                                            className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md transition-all ${loading ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'}`}
                                             title="清空内容">
-                                        <Trash2 size={16}/>
-                                        <span>清空</span>
+                                        <Trash2 size={14}/>
+                                        <span>清空文本</span>
                                     </button>
                                 )}
                             </div>
-                            {/* 🚀 7. 动态渲染的 发送 / 停止 按钮 */}
+
                             <button
-                                onClick={loading ? handleStop : handleTranslate}
+                                onClick={loading ? handleStop : () => handleTranslate(false)}
                                 disabled={!inputText.trim() && !loading}
-                                className={`p-3 rounded-xl flex items-center justify-center shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 ${
+                                className={`p-3.5 rounded-xl flex items-center justify-center shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 shrink-0 ${
                                     loading
-                                        ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
-                                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                        ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-red-200'
+                                        : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200'
                                 }`}
                                 title={loading ? "停止生成" : "发送翻译"}
                             >
                                 {loading ? (
-                                    <Square size={18} fill="currentColor" className="animate-in zoom-in duration-200"/>
+                                    <Square size={20} fill="currentColor" className="animate-in zoom-in duration-200"/>
                                 ) : (
                                     <SendHorizontal size={20} className="animate-in zoom-in duration-200"/>
                                 )}
@@ -317,7 +366,7 @@ function App() {
                         </div>
                     </section>
 
-                    {/* 🚀 优化 1：定高 + 内部自动滚动的思考框 */}
+                    {/* 思考框 */}
                     {loading && isThinking && thinkingContent && (
                         <section
                             className="bg-gray-50 border border-dashed border-gray-200 rounded-2xl p-4 animate-in fade-in duration-300 flex flex-col">
@@ -325,7 +374,6 @@ function App() {
                                 <BrainCircuit size={14} className="animate-pulse text-blue-400"/>
                                 AI 正在深度思考...
                             </h2>
-                            {/* 设置固定最大高度 max-h-40，超出自动显示滚动条 */}
                             <div
                                 ref={thinkingScrollRef}
                                 className="flex-1 max-h-40 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-200"
@@ -338,7 +386,7 @@ function App() {
                         </section>
                     )}
 
-                    {/* 🚀 优化 2：优雅的骨架屏（Skeleton），彻底隐藏底层 JSON 数据 */}
+                    {/* 骨架屏 */}
                     {loading && !isThinking && rawJsonContent && !result && (
                         <section
                             className="bg-white rounded-2xl p-5 border border-blue-100 shadow-sm animate-in fade-in duration-300">
@@ -348,7 +396,6 @@ function App() {
                                 <span className="text-sm font-medium">正在生成精美排版...</span>
                             </div>
 
-                            {/* 骨架动画：模拟文本生成的占位符 */}
                             <div className="space-y-3">
                                 <div className="h-4 bg-gray-100 rounded-md w-3/4 animate-pulse"></div>
                                 <div className="h-4 bg-gray-100 rounded-md w-1/2 animate-pulse"></div>
@@ -357,6 +404,7 @@ function App() {
                         </section>
                     )}
 
+                    {/* 结果渲染 */}
                     {result && !loading && (
                         <section className="flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-500">
                             <div
@@ -365,6 +413,16 @@ function App() {
                                     <h2 className="text-sm font-semibold text-blue-600 flex items-center gap-1">
                                         🗣️ 地道表达
                                     </h2>
+                                    {/* 🚀 升级版：更显眼、防误触的重新生成按钮 */}
+                                    <button
+                                        onClick={() => handleTranslate(true)}
+                                        disabled={loading}
+                                        className="flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 hover:border-blue-200 px-3 py-1.5 rounded-full shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="跳过缓存，使用当前模型重新翻译"
+                                    >
+                                        <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+                                        {loading ? '生成中...' : '换个说法'}
+                                    </button>
                                 </div>
                                 <div className="space-y-2">
                                     {result.translated_text.split(';').map((text, idx) => (
