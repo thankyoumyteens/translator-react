@@ -11,6 +11,7 @@ export interface AITranslateResult {
     pronounce: string;       // 美式音标
     comment: string;         // 翻译解析
     pronounce_tips: string;  // 发音与连读技巧
+    remaining_retries?: number;  // 剩余重试次数
 }
 
 // 接口完整响应结构

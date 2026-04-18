@@ -1,6 +1,7 @@
 // src/App.tsx
 import {useState, useEffect, useRef} from 'react';
-import {SendHorizontal, LogOut, User, Clock, Trash2, BrainCircuit, Square, Sparkles, RefreshCw} from 'lucide-react';import HistoryDrawer from './components/chat/HistoryDrawer';
+import {SendHorizontal, LogOut, User, Clock, Trash2, BrainCircuit, Square, Sparkles, RefreshCw} from 'lucide-react';
+import HistoryDrawer from './components/chat/HistoryDrawer';
 import type {AITranslateResult, HistoryItem} from './types/chat';
 import AuthModal from './components/auth/AuthModal';
 import toast, {Toaster} from 'react-hot-toast';
@@ -416,12 +417,23 @@ function App() {
                                     {/* 🚀 升级版：更显眼、防误触的重新生成按钮 */}
                                     <button
                                         onClick={() => handleTranslate(true)}
-                                        disabled={loading}
-                                        className="flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 hover:border-blue-200 px-3 py-1.5 rounded-full shadow-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        title="跳过缓存，使用当前模型重新翻译"
+                                        // 限制条件：loading 中，或者剩余次数为 0 时禁用按钮
+                                        disabled={loading || (result?.remaining_retries !== undefined && result.remaining_retries <= 0)}
+                                        className="flex flex-col items-end gap-0.5 group"
                                     >
-                                        <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-                                        {loading ? '生成中...' : '换个说法'}
+                                        <div
+                                            className="flex items-center gap-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 px-3 py-1.5 rounded-full transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                                            <RefreshCw size={14} className={loading ? "animate-spin" : ""}/>
+                                            {loading ? '生成中...' : '换个说法'}
+                                        </div>
+
+                                        {/* 🚀 明确提示这是今日配额 */}
+                                        {result?.remaining_retries !== undefined && (
+                                            <span
+                                                className={`text-[10px] mr-2 ${result.remaining_retries === 0 ? 'text-red-400 font-medium' : 'text-gray-400'}`}>
+                                                {result.remaining_retries === 0 ? '今日次数已耗尽' : `今日剩余 ${result.remaining_retries} 次`}
+                                            </span>
+                                        )}
                                     </button>
                                 </div>
                                 <div className="space-y-2">
